@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: theme("colors.base.950");
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: theme("fontFamily.display");
+    letter-spacing: -0.01em;
+  }
+  ::selection {
+    background: rgba(200, 255, 61, 0.25);
+    color: #fff;
+  }
+  /* Visible keyboard focus everywhere, respecting accessibility */
+  :focus-visible {
+    outline: 2px solid theme("colors.volt.500");
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Card surface with the studio's signature hairline + soft glow */
+  .vf-card {
+    @apply bg-base-800/80 border border-white/5 rounded-xl2 shadow-card backdrop-blur-sm;
+  }
+
+  .vf-card-glow {
+    @apply vf-card relative overflow-hidden;
+  }
+  .vf-card-glow::before {
+    content: "";
+    @apply absolute inset-0 bg-volt-glow pointer-events-none;
+  }
+
+  /* Circuit-trace divider — a nod to the wiring-diagram subject matter */
+  .vf-trace {
+    @apply relative h-px w-full bg-white/5;
+  }
+  .vf-trace::after {
+    content: "";
+    @apply absolute -top-[3px] left-0 h-[7px] w-[7px] rounded-full bg-volt-500/70 shadow-volt-glow;
+  }
+
+  .vf-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-volt-500 text-base-950 font-semibold px-5 py-2.5
+    hover:bg-volt-400 active:scale-[0.98] transition-all duration-150 shadow-volt-glow disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .vf-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-base-700 text-ink font-medium px-5 py-2.5 border border-white/10
+    hover:bg-base-600 active:scale-[0.98] transition-all duration-150 disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .vf-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg text-ink-muted font-medium px-4 py-2 hover:text-ink hover:bg-white/5 transition-colors duration-150;
+  }
+
+  .vf-input {
+    @apply w-full rounded-lg bg-base-900 border border-white/10 px-4 py-2.5 text-ink placeholder:text-ink-faint
+    focus:border-volt-500/60 focus:ring-1 focus:ring-volt-500/40 outline-none transition-colors duration-150;
+  }
+
+  .vf-label {
+    @apply block text-xs font-medium uppercase tracking-wider text-ink-muted mb-1.5;
+  }
+
+  .vf-badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+
+  .vf-eyebrow {
+    @apply text-xs font-mono uppercase tracking-[0.2em] text-volt-500;
+  }
+}
