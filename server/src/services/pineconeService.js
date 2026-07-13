@@ -1,57 +1,89 @@
 import { Pinecone } from "@pinecone-database/pinecone";
+import dotenv from "dotenv";
 
-let pineconeClient = null;
-let indexHandle = null;
+dotenv.config();
 
-/**
- * Lazily initializes and caches the Pinecone client + index handle.
- */
-const getIndex = () => {
-  if (!indexHandle) {
-    pineconeClient = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-    indexHandle = pineconeClient.index(process.env.PINECONE_INDEX);
-  }
-  return indexHandle;
-};
+const apiKey = process.env.PINECONE_API_KEY;
+const indexName = process.env.PINECONE_INDEX;
+const indexHost = process.env.PINECONE_HOST;
 
-/**
- * Upserts a batch of chunk vectors into a manual-specific namespace.
- * @param {string} namespace - unique namespace per manual (isolates search)
- * @param {{id: string, values: number[], metadata: object}[]} vectors
- */
+console.log("====================================");
+console.log("PINECONE DEBUG");
+console.log("API KEY LOADED:", !!apiKey);
+console.log("INDEX NAME:", indexName);
+console.log("INDEX HOST:", indexHost);
+console.log("====================================");
+
+if (!apiKey) {
+  throw new Error("PINECONE_API_KEY is missing");
+}
+
+if (!indexName) {
+  throw new Error("PINECONE_INDEX is missing");
+}
+
+if (!indexHost) {
+  throw new Error("PINECONE_HOST is missing");
+}
+
+const pineconeClient = new Pinecone({
+  apiKey,
+});
+
+const indexHandle = pineconeClient.index(
+  indexName,
+  indexHost
+);
+
 export const upsertVectors = async (namespace, vectors) => {
-  const index = getIndex();
   const BATCH_SIZE = 100;
+
   for (let i = 0; i < vectors.length; i += BATCH_SIZE) {
     const batch = vectors.slice(i, i + BATCH_SIZE);
-    await index.namespace(namespace).upsert(batch);
+
+    console.log(
+      `[Pinecone] Upserting ${batch.length} vectors`
+    );
+
+    await indexHandle
+      .namespace(namespace)
+      .upsert(batch);
   }
+
+  console.log("[Pinecone] Upsert completed");
 };
 
-/**
- * Queries the nearest chunks to an embedded question inside one namespace.
- * @param {string} namespace
- * @param {number[]} queryVector
- * @param {number} topK
- */
-export const queryNamespace = async (namespace, queryVector, topK = 5) => {
-  const index = getIndex();
-  const result = await index.namespace(namespace).query({
-    vector: queryVector,
-    topK,
-    includeMetadata: true,
-  });
+export const queryNamespace = async (
+  namespace,
+  queryVector,
+  topK = 5
+) => {
+  console.log(
+    `[Pinecone] Query namespace: ${namespace}`
+  );
+
+  console.log(
+    "[Pinecone] Vector dimension:",
+    queryVector.length
+  );
+
+  const result = await indexHandle
+    .namespace(namespace)
+    .query({
+      vector: queryVector,
+      topK,
+      includeMetadata: true,
+      includeValues: false,
+    });
+
+  console.log(
+    "[Pinecone] Matches:",
+    result.matches?.length || 0
+  );
+
   return result.matches || [];
 };
 
-/**
- * Queries across multiple manual namespaces (e.g. "search all my manuals")
- * and merges + re-sorts results by score.
- * @param {string[]} namespaces
- * @param {number[]} queryVector
- * @param {number} topKPerNamespace
- * @param {number} finalTopK
- */
 export const queryMultipleNamespaces = async (
   namespaces,
   queryVector,
@@ -59,21 +91,37 @@ export const queryMultipleNamespaces = async (
   finalTopK = 8
 ) => {
   const allMatches = await Promise.all(
-    namespaces.map((ns) => queryNamespace(ns, queryVector, topKPerNamespace))
+    namespaces.map((namespace) =>
+      queryNamespace(
+        namespace,
+        queryVector,
+        topKPerNamespace
+      )
+    )
   );
+
   return allMatches
     .flat()
-    .sort((a, b) => b.score - a.score)
+    .sort(
+      (a, b) =>
+        (b.score || 0) - (a.score || 0)
+    )
     .slice(0, finalTopK);
 };
 
-/**
- * Deletes an entire namespace — used when a manual is removed.
- * @param {string} namespace
- */
 export const deleteNamespace = async (namespace) => {
-  const index = getIndex();
-  await index.namespace(namespace).deleteAll();
+  await indexHandle
+    .namespace(namespace)
+    .deleteAll();
+
+  console.log(
+    `[Pinecone] Deleted namespace: ${namespace}`
+  );
 };
 
-export default { upsertVectors, queryNamespace, queryMultipleNamespaces, deleteNamespace };
+export default {
+  upsertVectors,
+  queryNamespace,
+  queryMultipleNamespaces,
+  deleteNamespace,
+};

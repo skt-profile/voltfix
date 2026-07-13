@@ -10,7 +10,7 @@
     "seed": "node src/utils/seed.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
+    "@google/generative-ai": "^0.24.1",
     "@pinecone-database/pinecone": "^3.0.3",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",

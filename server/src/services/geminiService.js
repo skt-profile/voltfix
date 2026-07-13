@@ -1,100 +1,260 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import dotenv from "dotenv";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+dotenv.config();
 
-const CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || "gemini-2.5-flash";
-const EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL || "text-embedding-004";
+// ===== DEBUG START =====
+console.log("====================================");
+console.log("Gemini Debug");
+console.log("====================================");
+console.log(
+  "GEMINI_API_KEY exists:",
+  !!process.env.GEMINI_API_KEY
+);
+
+if (process.env.GEMINI_API_KEY) {
+  console.log(
+    "GEMINI_API_KEY starts with:",
+    process.env.GEMINI_API_KEY.substring(0, 10)
+  );
+
+  console.log(
+    "GEMINI_API_KEY length:",
+    process.env.GEMINI_API_KEY.length
+  );
+} else {
+  console.log("GEMINI_API_KEY is NOT loaded");
+}
+
+console.log("====================================");
+// ===== DEBUG END =====
+
+const genAI = new GoogleGenerativeAI(
+  process.env.GEMINI_API_KEY
+);
+
+const CHAT_MODEL =
+  process.env.GEMINI_CHAT_MODEL ||
+  "gemini-2.5-flash";
+
+const EMBEDDING_MODEL =
+  process.env.GEMINI_EMBEDDING_MODEL ||
+  "gemini-embedding-001";
 
 /**
- * Generates an embedding vector for a piece of text.
- * Used both when indexing manual chunks and when embedding a user's query.
- * @param {string} text
- * @returns {Promise<number[]>}
+ * Generates a 768 dimension embedding vector.
+ * Pinecone index dimension must be 768.
  */
 export const embedText = async (text) => {
-  const model = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
-  const result = await model.embedContent(text);
-  return result.embedding.values;
+  try {
+    const model = genAI.getGenerativeModel({
+      model: EMBEDDING_MODEL,
+    });
+
+    const result = await model.embedContent({
+      content: {
+        role: "user",
+        parts: [
+          {
+            text: String(text),
+          },
+        ],
+      },
+
+      outputDimensionality: 768,
+    });
+
+    const values = result.embedding.values;
+
+    console.log(
+      "[Gemini Embedding] Dimension:",
+      values.length
+    );
+
+    if (values.length !== 768) {
+      throw new Error(
+        `Embedding dimension mismatch. Expected 768 but received ${values.length}`
+      );
+    }
+
+    return values;
+  } catch (error) {
+    console.error(
+      "[Gemini Embedding Error]:",
+      error.message
+    );
+
+    throw error;
+  }
 };
 
 /**
- * Batch-embeds an array of text chunks. Gemini's embedContent is called
- * per-chunk (the SDK does not currently expose a batch endpoint for all
- * models), but calls are run with limited concurrency to stay within
- * rate limits.
- * @param {string[]} texts
- * @param {number} concurrency
- * @returns {Promise<number[][]>}
+ * Batch embedding
  */
-export const embedBatch = async (texts, concurrency = 5) => {
+export const embedBatch = async (
+  texts,
+  concurrency = 5
+) => {
   const results = new Array(texts.length);
+
   let cursor = 0;
 
   async function worker() {
     while (cursor < texts.length) {
       const i = cursor++;
-      results[i] = await embedText(texts[i]);
+
+      results[i] = await embedText(
+        texts[i]
+      );
     }
   }
 
-  const workers = Array.from({ length: Math.min(concurrency, texts.length) }, worker);
+  const workerCount = Math.min(
+    concurrency,
+    texts.length
+  );
+
+  const workers = Array.from(
+    {
+      length: workerCount,
+    },
+    () => worker()
+  );
+
   await Promise.all(workers);
+
   return results;
 };
 
 /**
- * Sends a RAG-style prompt to Gemini: the retrieved manual context plus
- * the user's question and prior conversation turns, and asks for a
- * structured technical answer.
- * @param {{question: string, context: string, history: {role: string, content: string}[]}} params
- * @returns {Promise<string>}
+ * Chat with RAG context
  */
-export const askGeminiWithContext = async ({ question, context, history = [] }) => {
-  const model = genAI.getGenerativeModel({ model: CHAT_MODEL });
+export const askGeminiWithContext = async ({
+  question,
+  context,
+  history = [],
+}) => {
+  try {
+    const model = genAI.getGenerativeModel({
+      model: CHAT_MODEL,
+    });
 
-  const systemInstruction = `You are VoltFix AI, an expert electric-bike service technician assistant.
-Answer ONLY using the manual excerpts provided in the context below. If the context does not contain
-the answer, say so honestly and suggest what information would help.
+    const systemInstruction = `
+You are VoltFix AI.
+
+You are an expert electric bike service,
+diagnostics and maintenance assistant.
+
+You must answer ONLY using the manual
+context provided.
+
+If the manual context does not contain
+the answer, clearly say:
+
+"I could not find this information in
+the uploaded service manual."
+
 Always structure answers as:
-1. Direct answer
-2. Step-by-step instructions (numbered)
-3. Required tools (if any)
-4. Safety warnings (if any)
-Cite which manual/page each key fact comes from when the context provides that metadata.`;
 
-  const historyText = history
-    .map((h) => `${h.role === "user" ? "User" : "Assistant"}: ${h.content}`)
-    .join("\n");
+1. Direct Answer
 
-  const prompt = `${systemInstruction}
+2. Step-by-Step Instructions
 
---- CONVERSATION HISTORY ---
+3. Required Tools
+
+4. Safety Warnings
+
+5. Manual Reference
+
+Provide clear technical instructions
+for electric bike technicians.
+
+Do not invent technical information.
+`;
+
+    const historyText = history
+      .map(
+        (h) =>
+          `${
+            h.role === "user"
+              ? "User"
+              : "Assistant"
+          }: ${h.content}`
+      )
+      .join("\n");
+
+    const prompt = `
+${systemInstruction}
+
+================================
+CONVERSATION HISTORY
+================================
+
 ${historyText || "(none)"}
 
---- MANUAL CONTEXT ---
+================================
+SERVICE MANUAL CONTEXT
+================================
+
 ${context || "(no relevant context found)"}
 
---- USER QUESTION ---
-${question}`;
+================================
+TECHNICIAN QUESTION
+================================
 
-  const result = await model.generateContent(prompt);
-  return result.response.text();
+${question}
+`;
+
+    const result =
+      await model.generateContent(prompt);
+
+    return result.response.text();
+  } catch (error) {
+    console.error(
+      "[Gemini Chat Error]:",
+      error.message
+    );
+
+    throw error;
+  }
 };
 
 /**
- * Generic structured-JSON Gemini call used by the Battery Predictor and
- * other features that need a deterministic JSON payload back.
- * @param {string} prompt
- * @returns {Promise<object>}
+ * Structured JSON Gemini response
  */
-export const askGeminiForJson = async (prompt) => {
-  const model = genAI.getGenerativeModel({
-    model: CHAT_MODEL,
-    generationConfig: { responseMimeType: "application/json" },
-  });
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
-  return JSON.parse(text);
+export const askGeminiForJson = async (
+  prompt
+) => {
+  try {
+    const model = genAI.getGenerativeModel({
+      model: CHAT_MODEL,
+
+      generationConfig: {
+        responseMimeType:
+          "application/json",
+      },
+    });
+
+    const result =
+      await model.generateContent(prompt);
+
+    const text =
+      result.response.text();
+
+    return JSON.parse(text);
+  } catch (error) {
+    console.error(
+      "[Gemini JSON Error]:",
+      error.message
+    );
+
+    throw error;
+  }
 };
 
-export default { embedText, embedBatch, askGeminiWithContext, askGeminiForJson };
+export default {
+  embedText,
+  embedBatch,
+  askGeminiWithContext,
+  askGeminiForJson,
+};
